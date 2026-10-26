@@ -14,8 +14,7 @@ export class AppService {
     return {
       status: 'ok' as const,
       service: 'api',
-      database:
-        this.connection.readyState === 1 ? 'connected' : 'disconnected',
+      database: this.connection.readyState === 1 ? 'connected' : 'disconnected',
       timestamp: new Date().toISOString(),
     };
   }
