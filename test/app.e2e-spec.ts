@@ -31,6 +31,7 @@ describe('AppController (e2e)', () => {
 
     expect(response.body.status).toBe('ok');
     expect(response.body.service).toBe('api');
+    expect(response.body.database).toBe('connected');
   });
 
   afterEach(async () => {
