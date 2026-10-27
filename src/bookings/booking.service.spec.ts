@@ -5,10 +5,10 @@
 import { readFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { ConflictException } from '@nestjs/common';
+import { ConflictException, NotFoundException } from '@nestjs/common';
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
-import mongo, { Model } from 'mongoose';
+import mongo, { Model, Types } from 'mongoose';
 import { Booking, BookingSchema, BookingDoc } from './booking.schema.js';
 import { BookingService } from './booking.service.js';
 import { CreateBookingDto } from './booking.dto.js';
@@ -225,6 +225,43 @@ describe('BookingService', () => {
     expect(refusal(changed).reason).toBe('request-conflict');
   });
 
+  it('lists only a guest’s bookings and cancellation frees the held table', async () => {
+    const guestId = new Types.ObjectId().toString();
+    const otherGuestId = new Types.ObjectId().toString();
+    const date = shiftDays(sunday1, 14);
+    const original = await service.create(
+      party({
+        date,
+        guestId,
+        name: 'Account Guest',
+        email: 'account@example.com',
+        phone: '600 330 111',
+      }),
+    );
+    expect((await service.listForGuest(guestId)).map((row) => row.id)).toEqual([
+      original.id,
+    ]);
+    expect(await service.listForGuest(otherGuestId)).toEqual([]);
+
+    const cancelled = await service.cancelForGuest(original.id, guestId);
+    expect(cancelled.status).toBe('cancelled');
+    expect((await service.cancelForGuest(original.id, guestId)).status).toBe('cancelled');
+    await expect(service.cancelForGuest(original.id, otherGuestId)).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
+
+    const replacement = await service.create(
+      party({
+        date,
+        guestId: otherGuestId,
+        name: 'Replacement Guest',
+        email: 'replacement@example.com',
+        phone: '600 330 222',
+      }),
+    );
+    expect(replacement.table).toBe(original.table);
+  });
+
   it('does not exceed eight tables when ten different guests race for the same slot', async () => {
     const results = await Promise.all(
       Array.from({ length: 10 }, (_, index) =>
@@ -357,7 +394,6 @@ describe('BookingService', () => {
       time: '13:00',
       name: 'A',
       phone: '12',
-      email: 'nonsense',
       adults: 2,
       children: 0,
       requestId: randomUUID(),
@@ -366,7 +402,6 @@ describe('BookingService', () => {
     const props = new Set(errors.map((error) => error.property));
     expect(props.has('name')).toBe(true);
     expect(props.has('phone')).toBe(true);
-    expect(props.has('email')).toBe(true);
-    expect(errors.length).toBeGreaterThanOrEqual(3);
+    expect(errors.length).toBeGreaterThanOrEqual(2);
   });
 });

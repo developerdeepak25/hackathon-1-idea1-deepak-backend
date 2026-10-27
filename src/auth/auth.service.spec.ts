@@ -41,4 +41,17 @@ describe('AuthService', () => {
     const auth = service();
     expect(() => auth.me('not-a-token')).toThrow(UnauthorizedException);
   });
+
+  it('keeps guest and owner tokens in separate roles', async () => {
+    const auth = service();
+    const owner = await auth.login(email, password);
+    const guestToken = auth.signGuest('guest-123', 'guest@example.com');
+
+    expect(auth.guestMe(guestToken)).toEqual({
+      id: 'guest-123',
+      email: 'guest@example.com',
+    });
+    expect(() => auth.me(guestToken)).toThrow(UnauthorizedException);
+    expect(() => auth.guestMe(owner.token)).toThrow(UnauthorizedException);
+  });
 });

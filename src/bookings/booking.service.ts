@@ -1,6 +1,10 @@
-import { ConflictException, Injectable } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
+import { Model, Types } from 'mongoose';
 import type { TableDoc } from '../schedule/table.schema.js';
 import { ScheduleService } from '../schedule/schedule.service.js';
 import { TablesService } from '../schedule/tables.service.js';
@@ -101,6 +105,7 @@ export class BookingService {
     phone: string;
     email: string;
     requestId: string;
+    guestId?: string;
   }) {
     const existing = await this.model.findOne({ requestId: party.requestId }).exec();
     if (existing) {
@@ -127,6 +132,7 @@ export class BookingService {
           email: party.email.trim().toLowerCase(),
           phone: party.phone.trim(),
           seats,
+          ...(party.guestId ? { guestId: party.guestId } : {}),
           tableId: table._id,
           status: 'confirmed',
         });
@@ -152,10 +158,11 @@ export class BookingService {
   // One open day's rows for the owner, guests sorted by arrival and table.
   async listForDay(date: string) {
     const rows = await this.model
-      .find({ date, status: 'confirmed' })
+      .find({ date })
       .sort({ time: 1 })
       .exec();
-    const views = await Promise.all(rows.map((row) => this.view(row)));
+    const schedule = await this.schedule.get();
+    const views = await Promise.all(rows.map((row) => this.view(row, schedule)));
     return views.sort((a, b) => a.time.localeCompare(b.time) || a.table.localeCompare(b.table));
   }
 
@@ -167,18 +174,64 @@ export class BookingService {
     const rows = await this.model
       .find({
         date: { $gte: start, $lte: end },
-        status: 'confirmed',
       })
       .sort({ date: 1, time: 1 })
       .exec();
-    const views = await Promise.all(rows.map((row) => this.view(row)));
+    const schedule = await this.schedule.get();
+    const views = await Promise.all(rows.map((row) => this.view(row, schedule)));
     return views.sort((a, b) => a.date.localeCompare(b.date) || a.time.localeCompare(b.time) || a.table.localeCompare(b.table));
+  }
+
+  async listForGuest(guestId: string) {
+    const rows = await this.model
+      .find({ guestId })
+      .sort({ date: -1, time: 1 })
+      .exec();
+    const schedule = await this.schedule.get();
+    return Promise.all(rows.map((row) => this.view(row, schedule)));
+  }
+
+  async cancelForGuest(id: string, guestId: string) {
+    if (!Types.ObjectId.isValid(id)) throw new NotFoundException();
+    const booking = await this.model.findOne({ _id: id, guestId }).exec();
+    if (!booking) throw new NotFoundException();
+    if (booking.status === 'cancelled') return this.view(booking);
+    if (booking.status !== 'confirmed') throw new NotFoundException();
+
+    const now = new Intl.DateTimeFormat('en-GB', {
+      timeZone: 'Europe/Madrid',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      hourCycle: 'h23',
+    })
+      .formatToParts(new Date())
+      .reduce<Record<string, string>>((parts, part) => {
+        if (part.type !== 'literal') parts[part.type] = part.value;
+        return parts;
+      }, {});
+    const today = `${now.year}-${now.month}-${now.day}`;
+    const currentTime = `${now.hour}:${now.minute}`;
+    if (booking.date < today || (booking.date === today && booking.time <= currentTime)) {
+      throw new ConflictException({ reason: 'started' });
+    }
+
+    booking.status = 'cancelled';
+    await booking.save();
+    console.info('[iturrieta] booking cancelled', booking.id);
+    return this.view(booking);
   }
 
   // The clean row shape both the confirmation screen and the owner list use.
   // The table name comes from the referenced table document, never copied.
-  private async view(row: BookingDoc) {
+  private async view(
+    row: BookingDoc,
+    prices?: { adultPrice: number; childPrice: number },
+  ) {
     await row.populate('tableId', 'name');
+    const schedule = prices ?? (await this.schedule.get());
     return {
       id: row.id,
       date: row.date,
@@ -189,6 +242,7 @@ export class BookingService {
       adults: row.adults,
       children: row.children,
       seats: row.seats,
+      total: row.adults * schedule.adultPrice + row.children * schedule.childPrice,
       table: (row.tableId as unknown as { name: string }).name,
       status: row.status,
     };
@@ -204,6 +258,7 @@ export class BookingService {
       email: string;
       adults: number;
       children: number;
+      guestId?: string;
     },
   ) {
     const sameRequest =
@@ -213,7 +268,8 @@ export class BookingService {
       existing.phone === party.phone.trim() &&
       existing.email === party.email.trim().toLowerCase() &&
       existing.adults === party.adults &&
-      existing.children === party.children;
+      existing.children === party.children &&
+      String(existing.guestId ?? '') === (party.guestId ?? '');
     if (!sameRequest) {
       throw new ConflictException({ reason: 'request-conflict' });
     }

@@ -28,6 +28,9 @@ export class Booking {
   @Prop({ type: String })
   requestId?: string;
 
+  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'Guest' })
+  guestId?: Types.ObjectId;
+
   @Prop({ type: Number, required: true, min: 0 })
   adults!: number;
 

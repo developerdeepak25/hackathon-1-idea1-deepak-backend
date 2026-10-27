@@ -17,6 +17,12 @@ const scryptAsync = promisify(scrypt);
 const tokenHours = 12;
 
 type Session = { email: string };
+type TokenPayload = {
+  email?: string;
+  exp?: number;
+  role?: 'owner' | 'guest';
+  guestId?: string;
+};
 
 @Injectable()
 export class AuthService {
@@ -33,17 +39,37 @@ export class AuthService {
       throw new UnauthorizedException('Email or password is wrong.');
     }
     console.info('[iturrieta] owner login', { email: ownerEmail });
-    return { email: ownerEmail, token: this.sign(ownerEmail) };
+    return { email: ownerEmail, token: this.sign(ownerEmail, 'owner') };
   }
 
   me(token: string): Session {
     const payload = this.read(token);
-    return { email: payload.email };
+    if (payload.role !== 'owner' || !sameText(payload.email!, this.ownerEmail())) {
+      throw new UnauthorizedException('Sign in again.');
+    }
+    return { email: payload.email! };
   }
 
-  private sign(email: string) {
+  signGuest(guestId: string, email: string) {
+    return this.sign(email, 'guest', guestId);
+  }
+
+  guestMe(token: string) {
+    const payload = this.read(token);
+    if (payload.role !== 'guest' || !payload.guestId) {
+      throw new UnauthorizedException('Sign in again.');
+    }
+    return { id: payload.guestId, email: payload.email! };
+  }
+
+  private sign(email: string, role: 'owner' | 'guest', guestId?: string) {
     const body = Buffer.from(
-      JSON.stringify({ email, exp: Date.now() + tokenHours * 60 * 60 * 1000 }),
+      JSON.stringify({
+        email,
+        role,
+        ...(guestId ? { guestId } : {}),
+        exp: Date.now() + tokenHours * 60 * 60 * 1000,
+      }),
     ).toString('base64url');
     const sig = createHmac('sha256', this.key).update(body).digest('base64url');
     return `${body}.${sig}`;
@@ -60,17 +86,14 @@ export class AuthService {
       throw new UnauthorizedException('Sign in again.');
     }
     try {
-      const payload = JSON.parse(Buffer.from(body, 'base64url').toString()) as {
-        email?: string;
-        exp?: number;
-      };
+      const payload = JSON.parse(Buffer.from(body, 'base64url').toString()) as TokenPayload;
       if (!payload.email || !payload.exp || payload.exp < Date.now()) {
         throw new UnauthorizedException('Sign in again.');
       }
-      if (!sameText(payload.email, this.ownerEmail())) {
+      if (payload.role !== 'owner' && payload.role !== 'guest') {
         throw new UnauthorizedException('Sign in again.');
       }
-      return { email: payload.email };
+      return payload;
     } catch (error) {
       if (error instanceof UnauthorizedException) throw error;
       throw new UnauthorizedException('Sign in again.');

@@ -1,4 +1,13 @@
-import { Body, Controller, Get, Post, Query, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  Post,
+  Query,
+  Req,
+  UseGuards,
+} from '@nestjs/common';
 import {
   ApiBearerAuth,
   ApiConflictResponse,
@@ -7,10 +16,11 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import { OwnerGuard } from '../auth/owner.guard.js';
+import { GuestGuard } from '../auth/guest.guard.js';
 import { BookingService } from './booking.service.js';
 import { CreateBookingDto, QueryDayDto, QueryRangeDto } from './booking.dto.js';
 
-// Availability and confirm are public; the day list is owner only.
+// Availability is public; guest confirmation and the owner list are protected.
 @ApiTags('bookings')
 @Controller('bookings')
 export class BookingController {
@@ -46,6 +56,8 @@ export class BookingController {
   // Confirm. On a race the answer is 409 with the reason, so the page can
   // say full in words instead of a crash.
   @Post()
+  @UseGuards(GuestGuard)
+  @ApiBearerAuth()
   @ApiOperation({ summary: 'Confirm a booking, no payment' })
   @ApiOkResponse({
     schema: {
@@ -77,8 +89,33 @@ export class BookingController {
       },
     },
   })
-  create(@Body() body: CreateBookingDto) {
-    return this.bookings.create(body);
+  create(
+    @Body() body: CreateBookingDto,
+    @Req() request: { guest: { id: string; email: string } },
+  ) {
+    return this.bookings.create({
+      date: body.date,
+      time: body.time,
+      name: body.name,
+      phone: body.phone,
+      adults: body.adults,
+      children: body.children,
+      requestId: body.requestId,
+      email: request.guest.email,
+      guestId: request.guest.id,
+    });
+  }
+
+  @Post(':id/cancel')
+  @UseGuards(GuestGuard)
+  @ApiBearerAuth()
+  @ApiConflictResponse({ description: 'The arrival has already started' })
+  @ApiOperation({ summary: 'Cancel one of the guest’s future bookings' })
+  cancel(
+    @Param('id') id: string,
+    @Req() request: { guest: { id: string } },
+  ) {
+    return this.bookings.cancelForGuest(id, request.guest.id);
   }
 
   // Owner only, one day at a time.
@@ -154,5 +191,19 @@ export class BookingController {
           reason: result.reason,
           ...('maxParty' in result ? { maxParty: result.maxParty } : {}),
         };
+  }
+}
+
+@ApiTags('guests')
+@Controller('guests')
+export class GuestBookingsController {
+  constructor(private readonly bookings: BookingService) {}
+
+  @Get('bookings')
+  @UseGuards(GuestGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'The signed-in guest’s bookings' })
+  list(@Req() request: { guest: { id: string } }) {
+    return this.bookings.listForGuest(request.guest.id);
   }
 }

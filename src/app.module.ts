@@ -6,6 +6,7 @@ import { AppService } from './app.service.js';
 import { AuthModule } from './auth/auth.module.js';
 import { BookingModule } from './bookings/booking.module.js';
 import { ScheduleModule } from './schedule/schedule.module.js';
+import { GuestsModule } from './guests/guests.module.js';
 
 @Module({
   imports: [
@@ -13,6 +14,7 @@ import { ScheduleModule } from './schedule/schedule.module.js';
     ScheduleModule,
     BookingModule,
     AuthModule,
+    GuestsModule,
     MongooseModule.forRootAsync({
       inject: [ConfigService],
       useFactory: (config: ConfigService) => ({

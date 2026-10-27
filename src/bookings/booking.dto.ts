@@ -1,4 +1,4 @@
-import { IsEmail, IsInt, IsString, IsUUID, Length, Matches, Min } from 'class-validator';
+import { IsInt, IsString, IsUUID, Length, Matches, Min } from 'class-validator';
 
 // What the booking page sends when the guest confirms. Whitelist mode strips
 // anything else, so the API only ever sees the fields below. The page
@@ -20,9 +20,6 @@ export class CreateBookingDto {
   @IsString()
   @Matches(/(?:\D*\d){6,}/, { message: 'phone needs at least 6 digits' })
   phone!: string;
-
-  @IsEmail({}, { message: 'email is not valid' })
-  email!: string;
 
   @IsUUID()
   requestId!: string;
