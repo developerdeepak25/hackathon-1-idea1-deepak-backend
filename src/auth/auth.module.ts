@@ -6,6 +6,6 @@ import { OwnerGuard } from './owner.guard.js';
 @Module({
   controllers: [AuthController],
   providers: [AuthService, OwnerGuard],
-  exports: [AuthService],
+  exports: [AuthService, OwnerGuard],
 })
 export class AuthModule {}
